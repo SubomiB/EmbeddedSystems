@@ -1,0 +1,215 @@
+/* Includes ------------------------------------------------------------------*/
+#include "app.h"
+
+/* Private define ------------------------------------------------------------*/
+
+// Output Pin/Port define
+#define 	HORN_PORT	 		GPIOA
+#define 	HORN_PIN 			GPIO_PIN_4
+
+#define 	LIGHTS_PORT	 		GPIOC
+#define 	HEADLIGHTS_PIN		GPIO_PIN_4
+#define 	BRAKE_PIN 			GPIO_PIN_5
+
+#define 	SIGNAL_PORT		 	GPIOB
+#define 	RIGHT_PIN 			GPIO_PIN_0
+#define 	LEFT_PIN 			GPIO_PIN_1
+
+// Input Pin define
+#define		FOWARD_IN			GPIO_PIN_0
+#define		REVERSE_IN			GPIO_PIN_1
+#define		RIGHT_IN			GPIO_PIN_8
+#define		LEFT_IN				GPIO_PIN_9
+
+// Input define
+#define 	HORN				1
+#define 	HEADLIGHTS			2
+#define 	RIGHT_TURN			3
+#define 	LEFT_TURN			4
+
+// Signal state define
+#define		RIGHT_TURN_ON		1
+#define		LEFT_TURN_ON		1
+#define		RIGHT_TURN_OFF		0
+#define		LEFT_TURN_OFF		0
+
+
+
+/* Private function prototypes -----------------------------------------------*/
+
+/* Private variables ---------------------------------------------------------*/
+volatile int RC_Input = 0;
+volatile int rightTurn = 0;
+volatile int leftTurn = 0;
+volatile int overflow = 0;
+volatile int lightsCount = 0;
+volatile int rightSigCount = 0;
+volatile int leftSigCount = 0;
+volatile int tim2Count = 0;
+volatile int tim5Count = 0;
+
+
+
+extern TIM_HandleTypeDef htim3;
+extern TIM_HandleTypeDef htim2;
+extern TIM_HandleTypeDef htim5;
+
+void App_Init(void)
+{
+	HAL_TIM_Base_Start_IT(&htim3);
+	HAL_TIM_Base_Start_IT(&htim5);
+	HAL_GPIO_WritePin(LIGHTS_PORT, HEADLIGHTS_PIN, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(LIGHTS_PORT, BRAKE_PIN, GPIO_PIN_RESET);
+}
+
+void App_MainLoop(void)
+{
+
+	if (HAL_GPIO_ReadPin(LIGHTS_PORT, FOWARD_IN) == GPIO_PIN_RESET && HAL_GPIO_ReadPin(LIGHTS_PORT, REVERSE_IN) == GPIO_PIN_RESET)
+	{
+		HAL_GPIO_WritePin(LIGHTS_PORT, BRAKE_PIN, GPIO_PIN_SET);
+	}
+
+	else
+	{
+		HAL_GPIO_WritePin(LIGHTS_PORT, BRAKE_PIN, GPIO_PIN_RESET);
+	}
+
+	switch (RC_Input) {
+	case HORN:
+
+	break;
+
+	case HEADLIGHTS:
+		HAL_GPIO_TogglePin(LIGHTS_PORT, HEADLIGHTS_PIN);
+		RC_Input = 0;
+	break;
+
+	case RIGHT_TURN:
+		if (rightTurn == RIGHT_TURN_OFF)
+		{
+			rightTurn = RIGHT_TURN_ON;
+			leftTurn = LEFT_TURN_OFF;
+		}
+		else
+		{
+			rightTurn = RIGHT_TURN_OFF;
+			HAL_GPIO_WritePin(SIGNAL_PORT, RIGHT_PIN, GPIO_PIN_RESET);
+		}
+		RC_Input = 0;
+	break;
+
+	case LEFT_TURN:
+		if (leftTurn == LEFT_TURN_OFF)
+		{
+			leftTurn = LEFT_TURN_ON;
+			rightTurn = RIGHT_TURN_OFF;
+		}
+		else
+		{
+			leftTurn = LEFT_TURN_OFF;
+			HAL_GPIO_WritePin(SIGNAL_PORT, LEFT_PIN, GPIO_PIN_RESET);
+		}
+		RC_Input = 0;
+	break;
+	}
+
+}
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *p_htim)
+{
+	if (p_htim == &htim3)
+	{
+		if (rightTurn == RIGHT_TURN_ON) {
+			HAL_GPIO_TogglePin(SIGNAL_PORT, RIGHT_PIN);
+		}
+		if (leftTurn == LEFT_TURN_ON) {
+			HAL_GPIO_TogglePin(SIGNAL_PORT, LEFT_PIN);
+		}
+
+	}
+
+	if (p_htim == &htim2)
+	{
+		lightsCount = 0;
+		HAL_TIM_Base_Stop_IT(&htim2);
+	}
+
+	if (p_htim == &htim5)
+	{
+		rightSigCount = 0;
+		leftSigCount = 0;
+		HAL_TIM_Base_Stop_IT(&htim5);
+	}
+}
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+  if (GPIO_Pin == FOWARD_IN)
+  {
+	  tim2Count = __HAL_TIM_GET_COUNTER(&htim2);
+
+	  if (tim2Count == 0 || tim2Count > 200)
+		  {
+			  lightsCount++;
+			  rightSigCount = 0;
+			  leftSigCount = 0;
+		  }
+
+	  HAL_TIM_Base_Start_IT(&htim2);
+
+	  if (lightsCount == 2)
+		  {
+			  RC_Input = HEADLIGHTS;
+			  lightsCount = 0;
+		  }
+  }
+
+
+/*  if (GPIO_Pin == REVERSE_IN)
+    {
+
+    }
+*/
+  if (GPIO_Pin == RIGHT_IN)
+    {
+	  tim5Count = __HAL_TIM_GET_COUNTER(&htim5);
+
+	  if (tim5Count == 0 || tim5Count > 200)
+	 	  {
+		  	  rightSigCount++;
+		  	  lightsCount = 0;
+		  	  leftSigCount = 0;
+	 	  }
+
+	  HAL_TIM_Base_Start_IT(&htim5);
+
+	  if (rightSigCount == 2)
+	  	 {
+	  		RC_Input = RIGHT_TURN;
+	  		rightSigCount = 0;
+	  	 }
+    }
+
+  if (GPIO_Pin == LEFT_IN)
+    {
+	  tim5Count = __HAL_TIM_GET_COUNTER(&htim5);
+
+ 	  if (tim5Count == 0 || tim5Count > 200)
+	  	  {
+	  		 leftSigCount++;
+	  		 lightsCount = 0;
+	  		 rightSigCount = 0;
+	   	  }
+
+	 HAL_TIM_Base_Start_IT(&htim5);
+
+	 if (leftSigCount == 2)
+	 	 {
+		 	 RC_Input = LEFT_TURN;
+		 	 leftSigCount = 0;
+	 	 }
+    }
+
+
+}
